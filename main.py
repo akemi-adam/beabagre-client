@@ -1,104 +1,22 @@
-from http.client import HTTPConnection, HTTPResponse
-from signal import signal, SIGPIPE, SIG_DFL   
+from signal import signal, SIGPIPE, SIG_DFL
+from getpass import getpass
 
-import sys
-import json
-
-class Response:
-    def __init__(self, response: HTTPResponse):
-        try:
-            self.response = json.loads(response.read())
-        except json.JSONDecodeError:
-            self.response = json.loads('[]')
-
-    def format_response(self) -> str:
-        formated_response: str = ''
-        if type(self.response) is dict:
-            formated_response = self.run_dict(self.response)
-        else:
-            for json in self.response:
-                formated_response += self.run_dict(json)
-        return formated_response
-
-
-    def run_dict(self, json: dict|list) -> str:
-        formated_response = '{\n'
-        for key in json.keys():
-            formated_response += '  "{}": "{}",\n'.format(key, json.get(key))
-        formated_response += '},\n\n'
-        return formated_response
-
-    def __str__(self) -> str:
-        return self.format_response()
-
-
-class Request: 
-    def __init__(self, method: str, endpoint: str = ''):
-        self.connection: HTTPConnection = HTTPConnection(sys.argv[1])
-        self.method = method
-        self.endpoint = endpoint
-
-    def make_request(self, body: dict = {}, headers: dict[str, str] = {'Content-Type': 'application/json'}) -> Response:
-        self.connection.request(self.method, self.endpoint, json.dumps(body), headers)
-        return Response(self.connection.getresponse())
-
-
-class SuapClient:
-    pass
-
-
-class Account:
-    pass
-
-
-class Bagre:
-    def __init__(self, specie: str, weight: float, size: int, color: str) -> None:
-        self.specie = specie
-        self.weight = weight
-        self.size = size
-        self.color = color
-
-
-class BagreCreate(Bagre):
-    def __init__(self, specie: str, weight: float, size: int, color: str) -> None:
-        while True:
-            if specie != '' and weight != 0 and size != 0 and color != '':
-                break
-            elif specie == '':
-                specie = input('Espécie não pode ser nula: ')
-            elif weight <= 0:
-                weight = float(input('Peso não pode ser 0: '))
-            elif size <= 0:
-                size = int(input('Tamanho não pode ser 0: '))
-            elif color == '':
-                color = input('Cor não pode ser nula: ')
-        super().__init__(specie, weight, size, color)
-
-
-class BagreEdit(Bagre):
-    def __init__(self, specie: str, weight: float, size: int, color: str, uuid: str) -> None:
-        request: Request = Request('GET', f'/bagres/{uuid}')
-        response = request.make_request().response
-        self.specie = response.get('specie')
-        self.size = response.get('size')
-        self.weight = response.get('weight')
-        self.color = response.get('color')
-        if specie != '':
-            self.specie = specie
-        if weight > 0:
-            self.weight = weight
-        if size > 0:
-            self.size = size
-        if color != '':
-            self.color = color
+from client import Request, Response, BagreEdit, BagreCreate, Account
 
 
 class Menu:
     def __init__(self) -> None:
-        self.operations = [Request('GET', '/bagres/'), Request('GET'), Request('POST', '/bagres/'), Request('PUT'), Request('DELETE')]
+        self.operations = [
+            Request(method='POST', endpoint='/login'),
+            Request(endpoint='/bagres'),
+            Request(),
+            Request(method='POST', endpoint='/bagres'),
+            Request(method='PUT'),
+            Request(method='DELETE')
+        ]
 
     def show(self) -> None:
-        print('\n-----------------------\nOperações\n-----------------------\n1 - Listar todos os bagres\n2 - Recuperar um bagre\n3 - Cadastrar um bagre\n4 - Editar um bagre\n5 - Deletar um bagre\n6 - Sair')
+        print('\n-----------------------\nOperações\n-----------------------\n1 - Fazer login\n2 - Listar todos os bagres\n3 - Recuperar um bagre\n4 - Cadastrar um bagre\n5 - Editar um bagre\n6 - Deletar um bagre\n7 - Sair')
 
     def select_option(self, option: int, body: dict = {}, headers: dict[str, str] = {'Content-Type': 'application/json'}, uuid: str|bool = False) -> Response:
         request = self.operations[option]
@@ -115,37 +33,63 @@ menu: Menu = Menu()
 
 loop: bool = True
 
-signal(SIGPIPE, SIG_DFL) 
+signal(SIGPIPE, SIG_DFL)
+
+account: Account|None = None
+
+token: str|None = None
+
 
 while loop:
     menu.show()
     print('')
-    option = input('Escolha uma opção: ')
+    option = int(input('Escolha uma opção: '))
     print('')
+    if option >= 2 and option <= 6 and not token:
+        print('Faça login antes de usar essas funcionalidades!')
+        continue
     match option:
-        case '1':
+        case 1:
+            print('Digete suas credenciais')
+            account = Account(input('Matrícula: '), getpass('Senha: '))
+            response = menu.select_option(0, account.__dict__)
+            token = response.response.get('token')
+            headers = headers={'Content-Type': 'application/json', 'token': token}
+            print('Login feito com sucesso!')
+        case 2:
             try:
-                response = menu.select_option(int(option) - 1)
+                response = menu.select_option(option=1, headers=headers)
             except BrokenPipeError:
-                response = menu.select_option(0)
+                response = menu.select_option(1)
             menu.show_response(response)
-        case '2':
-            response = menu.select_option(int(option) - 1, uuid=input('Insira o UUID: '))
+        case 3:
+            response = menu.select_option(option=2, uuid=input('Insira o UUID: '), headers=headers)
             menu.show_response(response)
-        case '3':
+        case 4:
             print('Digite as informações do bagre')
             body: BagreCreate = BagreCreate(input('Espécie: '), float(input('Peso: ')), int(input('Tamanho: ')), input('Cor: '))
-            response = menu.select_option(int(option) - 1, body.__dict__)
+            response = menu.select_option(option=3, body=body.__dict__, headers=headers)
             menu.show_response(response)
-        case '4':
+        case 5:
             uuid: str = input('Insira o UUID: ')
-            body: BagreEdit = BagreEdit(input('Espécie: '), float(input('Peso: ')), int(input('Tamanho: ')), input('Cor: '), uuid)
-            response = menu.select_option(int(option) - 1, body.__dict__, uuid=uuid)
+            specie = input('Espécie: ')
+            weight = input('Peso: ')
+            if weight:
+                weight = float(weight)
+            else:
+                weight = 0
+            size = input('Tamanho: ')
+            if size:
+                size = int(size)
+            else:
+                size = 0
+            color = input('Cor: ')
+            body: BagreEdit = BagreEdit(specie, weight, size, color, uuid, headers)
+            response = menu.select_option(4, body.model_dump(), headers, uuid)
             menu.show_response(response)
-        case '5':
-            response = menu.select_option(int(option) - 1, uuid=input('Insira o UUID: '))
+        case 6:
+            response = menu.select_option(option=5, headers=headers, uuid=input('Insira o UUID: '))
             menu.show_response(response)
         case _:
             print('\nPrograma encerrado')
             loop = False
-
